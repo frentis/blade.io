@@ -1,131 +1,316 @@
 /************************************************
- *  Пример иллюстрации футуристичного города
- *  c мерцающими огнями и движущимися объектами.
- *  (на основе p5.js)
+ * Futuristic Blade Runner City
+ * Более проработанная версия иллюстрации
+ * с несколькими слоями города (параллакс),
+ * летающими машинами, дождём и неоновыми вывесками.
  ************************************************/
 
-// Массив зданий
-let buildings = [];
+// Параметры сцены
+let WIDTH = 800;
+let HEIGHT = 600;
 
-// Массив летающих объектов (например, дронов/машин)
-let flyingObjects = [];
+// Массив слоёв города (для эффекта параллакса)
+let cityLayers = [];
+
+// Массив летающих объектов
+let flyingCars = [];
+
+// Массив капель дождя
+let raindrops = [];
+
+// Неоновая вывеска (пример класса вывески)
+let neonSign;
 
 function setup() {
-  createCanvas(800, 600);
-  noStroke();
-  
-  // Инициализация зданий
-  for (let i = 0; i < 15; i++) {
-    let w = random(50, 100);
-    let h = random(150, 400);
-    let x = i * (width / 15);
-    let y = height - h;
-    buildings.push({
-      x: x,
-      y: y,
-      w: w,
-      h: h,
-      cols: floor(random(3, 6)), 
-      rows: floor(random(3, 8)), 
-      color: color(random(100, 255), random(100, 255), random(100, 255)),
-    });
+  createCanvas(WIDTH, HEIGHT);
+
+  // Инициализируем слои города: от дальнего к ближнему
+  // Чем дальше слой, тем ниже контраст/цвет и ниже скорость параллакса
+  cityLayers.push(new CityLayer( 50,  20, color(70),    0.2));  // Самый дальний слой
+  cityLayers.push(new CityLayer(200, 15, color(50),    0.4));
+  cityLayers.push(new CityLayer(350, 10, color(30),    0.6));   // Средний слой
+  cityLayers.push(new CityLayer(450,  8, color(20),    0.8));   // Ближний слой
+
+  // Инициализация летающих машин (дронов)
+  for (let i = 0; i < 6; i++) {
+    flyingCars.push(new FlyingCar());
   }
 
-  // Инициализация летающих объектов
-  for (let i = 0; i < 5; i++) {
-    flyingObjects.push({
-      x: random(width),
-      y: random(height / 3),
-      speed: random(1, 3),
-      size: random(10, 20),
-      color: color(random(100, 255), random(100, 255), random(100, 255), 200)
-    });
+  // Инициализируем дождь
+  for (let i = 0; i < 300; i++) {
+    raindrops.push(new RainDrop());
   }
+
+  // Пример неоновой вывески
+  neonSign = new NeonSign("BLADE CITY", width / 2, height / 4);
 }
 
 function draw() {
-  background(10, 10, 30); // Тёмное неоновое небо
-  
-  // Рисуем "дождь" или туман
-  drawRainOrFog();
+  background(10, 10, 30); // Тёмное "неоновое" небо
 
-  // Рисуем здания
-  drawBuildings();
-  
-  // Неоновые вывески
-  drawNeonSigns();
-  
-  // Летающие объекты
-  drawFlyingObjects();
-}
+  // Сначала можно нарисовать градиент, имитирующий закат или "туман"
+  drawSkyGradient();
 
-function drawRainOrFog() {
-  stroke(150, 150, 255, 20);
-  for (let i = 0; i < 20; i++) {
-    let rx = random(width);
-    let ry = random(height);
-    line(rx, ry, rx + random(-5, 5), ry + random(10, 30));
+  // Дальний (фоновые) слои города
+  for (let layer of cityLayers) {
+    layer.draw();
   }
-  noStroke();
+
+  // Рисуем дождь (между слоями и перед машинами)
+  for (let drop of raindrops) {
+    drop.update();
+    drop.draw();
+  }
+
+  // Летающие машины (на переднем плане)
+  for (let car of flyingCars) {
+    car.update();
+    car.draw();
+  }
+
+  // Неоновая вывеска
+  neonSign.update();
+  neonSign.draw();
 }
 
-function drawBuildings() {
-  for (let b of buildings) {
-    // Тень
-    fill(20);
-    rect(b.x + 5, b.y + 5, b.w, b.h);
+/* ----------------------------------------------
+   Класс "CityLayer"
+   - хранит набор зданий
+   - имеет фактор параллакса
+   ---------------------------------------------- */
 
-    // Здание
-    fill(40);
-    rect(b.x, b.y, b.w, b.h);
+class CityLayer {
+  constructor(baseY, buildingCount, baseColor, parallaxFactor) {
+    this.baseY = baseY;             // Средняя "линия" горизонта для слоя
+    this.buildingCount = buildingCount;
+    this.baseColor = baseColor;
+    this.parallaxFactor = parallaxFactor;
+    this.buildings = [];
 
-    // Окна
-    let windowWidth = b.w / b.cols;
-    let windowHeight = b.h / b.rows;
-    for (let col = 0; col < b.cols; col++) {
-      for (let row = 0; row < b.rows; row++) {
-        let wx = b.x + col * windowWidth + 2;
-        let wy = b.y + row * windowHeight + 2;
+    // Генерируем здания в данном слое
+    this.generateBuildings();
+  }
 
-        // Мерцание
-        let flicker = random(1) > 0.9; // 10% шанс отключиться
-        let c = flicker ? color(10) : b.color;
+  generateBuildings() {
+    let totalWidth = 0;
 
-        fill(c);
+    for (let i = 0; i < this.buildingCount; i++) {
+      // Случайная ширина и высота
+      let w = random(50, 120);
+      let h = random(100, 350);
+
+      // Позиция по X — складываем ширину, чтобы расположить здания вплотную (примерно)
+      let x = totalWidth;
+      totalWidth += w + random(10, 30);
+
+      // Рандомная плотность окон
+      let cols = floor(random(3, 6));
+      let rows = floor(random(4, 10));
+
+      // Цвет окон
+      let windowColor = color(random(100, 255), random(100, 255), random(100, 255));
+
+      let b = new Building(x, this.baseY - h, w, h, this.baseColor, cols, rows, windowColor);
+      this.buildings.push(b);
+    }
+  }
+
+  draw() {
+    // Рассчитываем "движение" слоя по X
+    // Чтобы был эффект параллакса, смещаем в зависимости от мыши или от frameCount
+    // Ниже — простой вариант с привязкой к frameCount
+    let offsetX = (frameCount * 0.5) * this.parallaxFactor; 
+    offsetX = offsetX % width; // чтобы сдвиг "зацикливался"
+
+    push();
+    translate(-offsetX, 0); // смещаем на offsetX влево
+    // Рисуем "повтор" слоя, чтобы заполнить весь холст
+    // (рисуем дважды: основной блок и клон после него)
+
+    for (let i = 0; i < 2; i++) {
+      let shift = i * this.totalWidth();
+      push();
+      translate(shift, 0);
+      for (let b of this.buildings) {
+        b.draw();
+      }
+      pop();
+    }
+    pop();
+  }
+
+  // Вычислить общую ширину слоя (по сумме ширин зданий)
+  totalWidth() {
+    let tw = 0;
+    for (let b of this.buildings) {
+      tw += b.w + 20; // небольшие зазоры
+    }
+    return tw;
+  }
+}
+
+/* ----------------------------------------------
+   Класс "Building"
+   - отдельное здание со своими окнами
+   ---------------------------------------------- */
+class Building {
+  constructor(x, y, w, h, baseColor, cols, rows, windowColor) {
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+    this.baseColor = baseColor;
+    this.cols = cols;
+    this.rows = rows;
+    this.windowColor = windowColor;
+  }
+
+  draw() {
+    // Тень (сдвиг)
+    fill(red(this.baseColor)*0.3, green(this.baseColor)*0.3, blue(this.baseColor)*0.3);
+    rect(this.x+5, this.y+5, this.w, this.h);
+
+    // Основной прямоугольник здания
+    fill(this.baseColor);
+    rect(this.x, this.y, this.w, this.h);
+
+    // Рисуем окна
+    let windowWidth = this.w / this.cols;
+    let windowHeight = this.h / this.rows;
+
+    for (let c = 0; c < this.cols; c++) {
+      for (let r = 0; r < this.rows; r++) {
+        let wx = this.x + c * windowWidth + 2;
+        let wy = this.y + r * windowHeight + 2;
+
+        // Мерцание окон: некоторый процент окон "гаснет"
+        let flicker = random(1) > 0.88; // ~12% шанс отключиться
+        let cWin = flicker ? color(10, 10, 10) : this.windowColor;
+        fill(cWin);
         rect(wx, wy, windowWidth - 4, windowHeight - 4);
       }
     }
   }
 }
 
-function drawNeonSigns() {
-  push();
-  textAlign(CENTER, CENTER);
-  textSize(32);
-  let alphaVal = map(sin(frameCount * 0.1), -1, 1, 50, 255);
+/* ----------------------------------------------
+   Класс "FlyingCar"
+   - летающая машина/дрон
+   - двигается по горизонтали, затем возвращается
+   ---------------------------------------------- */
+class FlyingCar {
+  constructor() {
+    this.reset();
+  }
 
-  fill(255, 50, 150, alphaVal);
-  text("NEON", width / 2, height / 4);
+  reset() {
+    this.x = random(-200, -50);
+    this.y = random(50, height - 200);
+    this.speed = random(2, 5);
+    this.size = random(20, 35);
+    this.color = color(random(100, 255), random(100, 255), random(100, 255), 200);
+  }
 
-  fill(50, 255, 200, alphaVal);
-  textSize(24);
-  text("TECH", width / 2 + 100, height / 3);
-  pop();
+  update() {
+    this.x += this.speed;
+    if (this.x > width + 100) {
+      // Перезапускаем машину слева
+      this.reset();
+    }
+  }
+
+  draw() {
+    push();
+    noStroke();
+    fill(this.color);
+    // Основное "тело" машины
+    ellipse(this.x, this.y, this.size * 1.5, this.size);
+
+    // Небольшая кабина или огни
+    fill(255, 255, 255, 200);
+    ellipse(this.x + this.size * 0.2, this.y, this.size * 0.4, this.size * 0.4);
+
+    // Выхлоп/шлейф
+    fill(red(this.color), green(this.color), blue(this.color), 50);
+    ellipse(this.x - this.size * 0.8, this.y, this.size * 0.8, this.size * 0.3);
+    pop();
+  }
 }
 
-function drawFlyingObjects() {
-  for (let obj of flyingObjects) {
-    // Движение объектов слева направо
-    obj.x += obj.speed;
-    if (obj.x > width + 50) {
-      obj.x = -50; // Возвращаем объект назад
+/* ----------------------------------------------
+   Класс "RainDrop"
+   - капля дождя, падает сверху вниз
+   ---------------------------------------------- */
+class RainDrop {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.x = random(width);
+    this.y = random(-height, 0);
+    this.speed = random(8, 15);
+    this.len = random(10, 20);
+  }
+
+  update() {
+    this.y += this.speed;
+    if (this.y > height) {
+      this.reset();
     }
+  }
 
-    fill(obj.color);
-    ellipse(obj.x, obj.y, obj.size, obj.size / 2);
+  draw() {
+    stroke(150, 150, 255, 180);
+    line(this.x, this.y, this.x, this.y + this.len);
+  }
+}
 
-    // Шлейф
-    fill(red(obj.color), green(obj.color), blue(obj.color), 50);
-    ellipse(obj.x - obj.size, obj.y, obj.size / 1.5, obj.size / 3);
+/* ----------------------------------------------
+   Класс "NeonSign"
+   - неоновая вывеска с мерцающей анимацией
+   ---------------------------------------------- */
+class NeonSign {
+  constructor(txt, x, y) {
+    this.txt = txt;
+    this.x = x;
+    this.y = y;
+    this.baseSize = 48;
+    this.t = 0;
+  }
+
+  update() {
+    // Анимация синусом для мерцания
+    this.t += 0.1;
+  }
+
+  draw() {
+    push();
+    textAlign(CENTER, CENTER);
+    let alphaVal = map(sin(this.t), -1, 1, 50, 255);
+    let txtSize = this.baseSize + sin(this.t * 0.5) * 5; // небольшие колебания размера
+
+    textSize(txtSize);
+    fill(255, 60, 200, alphaVal);
+    text(this.txt, this.x, this.y);
+    pop();
+  }
+}
+
+/* ----------------------------------------------
+   Фоновый градиент неба (или тумана)
+   ---------------------------------------------- */
+function drawSkyGradient() {
+  // Цвет вверху
+  let topColor = color(10, 10, 30);
+  // Цвет внизу
+  let bottomColor = color(30, 10, 50);
+
+  noFill();
+  for (let i = 0; i < height; i++) {
+    let inter = map(i, 0, height, 0, 1);
+    let c = lerpColor(topColor, bottomColor, inter);
+    stroke(c);
+    line(0, i, width, i);
   }
 }
